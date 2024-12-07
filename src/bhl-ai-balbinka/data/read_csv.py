@@ -13,4 +13,4 @@ def find_peakflux(data: pd.DataFrame, id):
 
 if __name__ == "__main__":
     a = get_labels("./data/SDOBenchmark-data-example/training/meta_data.csv")
-    print(find_peakflux(a, '11389_2012_01_01_19_06_00_0'))
+    print(find_peakflux(a, '11388_2012_01_07_02_27_01_0'))
