@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torchvision.datasets import ImageFolder
+from torch.utils.data import random_split
 import numpy as np
 from torchvision import transforms
 from PIL import Image
@@ -12,12 +13,9 @@ import pandas as pd
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from data.read_csv import find_peakflux
+from data.read_csv import normalize
 
 from data.load_data import main_load, get_data_dir
-
-# Set CUDA device
-os.environ['CUDA_VISIBLE_DEVICES'] = "2"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -27,14 +25,12 @@ class SDOBenchmarkDataset(Dataset):
         self.data_path = data_path
         self.dim = params['dim']
         self.channels = params['channels']
-        self.label_func = params['label_func']
         self.transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5] * len(self.channels), std=[0.5] * len(self.channels))
         ])
         self.labels: pd.DataFrame = None
         self.data, self.labels = self.load_data()
-        self.data1, _ = self.load_data()
 
 
     def load_data(self):
@@ -45,23 +41,8 @@ class SDOBenchmarkDataset(Dataset):
         images_dir = os.path.join(self.data_path)
         labels_file = os.path.join(self.data_path, 'meta_data.csv')
         label_data = pd.read_csv(labels_file)
-        # labels = [1.88E-06, 7.53E-07, 3.06E-06, 5.76E-06, 1.00E-09] #@TODO TEMP
-
-        # for _, row in label_data.iterrows():
-        #     image_id = row['image_id']
-        #     label = row['label']
-
-        #     # Collect all channel paths for this sample
-        #     channel_paths = [
-        #         os.path.join(images_dir, f"{image_id}_{channel}.png") for channel in self.channels
-        #     ]
-        #     if all(os.path.exists(p) for p in channel_paths):  # Check all channels exist
-        #         image_data.append(channel_paths)
-        #         labels.append(label)
         transform = transforms.Compose([
             transforms.ToTensor(),
-        # Optionally, you can normalize the images if needed:
-        # transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         ])
         for folder in main_load(self.data_path):
             path = os.path.join(images_dir, folder)
@@ -75,7 +56,7 @@ class SDOBenchmarkDataset(Dataset):
                     image_tensors.append(image_tensor)
                 folder_tensor = torch.stack(image_tensors)  # Stack images into one tensor for this folder
                 id = '_'.join(folder.split('\\')[-2:])
-                labels.append(find_peakflux(label_data, id))
+                labels.append(normalize(label_data, id))
                 image_data.append(folder_tensor)
 
 
@@ -83,7 +64,7 @@ class SDOBenchmarkDataset(Dataset):
 
 
     def __len__(self):
-        return len(self.data1)
+        return len(self.data)
 
     def __getitem__(self, idx):
         images = self.data[idx]  # Assuming list of file paths
@@ -99,7 +80,7 @@ class SDOBenchmarkDataset(Dataset):
 
 # Define the model
 class SolarFlareModel(nn.Module):
-    def __init__(self, scales, num_categories):
+    def __init__(self):
         super(SolarFlareModel, self).__init__()
 
         self.my_test = nn.Sequential(
@@ -162,36 +143,26 @@ base_path = os.path.join(get_data_dir(), 'SDOBenchmark-data-example')
 params = {'dim': (4, 256, 256, 4),
           'batch_size': 1,
           'channels': ['magnetogram', '304', '131', '1700'],
-          'shuffle': True,
-          'label_func': lambda y: torch.tensor(np.floor(np.log10(y) + 9).astype(int))}
+          'shuffle': True}
 
-training_dataset = SDOBenchmarkDataset(os.path.join(base_path, 'training'), params)
-validation_dataset = SDOBenchmarkDataset(os.path.join(base_path, 'test'), params)
+train_dataset = SDOBenchmarkDataset(os.path.join(base_path, 'training'), params)
+# train_dataset , validation_dataset = random_split(full_training_dataset, [0.9, 0.1])
+test_dataset = SDOBenchmarkDataset(os.path.join(base_path, 'test'), params)
 
-train_loader = DataLoader(training_dataset, batch_size=params['batch_size'], shuffle=params['shuffle'])
-val_loader = DataLoader(validation_dataset, batch_size=params['batch_size'], shuffle=False)
-val_loader_2 = DataLoader(validation_dataset, batch_size=params['batch_size'], shuffle=False)
+train_loader = DataLoader(train_dataset, batch_size=params['batch_size'], shuffle=params['shuffle'])
+# val_loader = DataLoader(validation_dataset, batch_size=params['batch_size'], shuffle=False)
+# val_loader_2 = DataLoader(validation_dataset, batch_size=params['batch_size'], shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=params['batch_size'], shuffle=False)
 
-scales = [64, 64 * 3, 1, 128, 128]
-num_categories = 7
-
-model = SolarFlareModel(scales, num_categories).to(device)
+model = SolarFlareModel().to(device)
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Training loop
-def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=10):
+def train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs=10):
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
-
-
-#        for idx in range(len(train_loader)):
-
-        #    images, labels = train_loader[idx]
-            # Process one sample at a time
-
-        #images, labels = next(iter(train_loader))
         for images, labels in train_loader:
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
@@ -206,14 +177,17 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         # Validation
         model.eval()
         val_loss = 0.0
+        test_amount = 0
         with torch.no_grad():
-            for images, labels in val_loader_2:
+            for images, labels in test_loader:
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images, labels)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
+                test_amount += 1
 
-        print(f"Validation Loss: {val_loss/len([1, 2, 3]):.4f}")
+        print(f"Validation Loss: {val_loss/test_amount:.4f}")
 
 # Train the model
-train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=10)
+train_model(model, train_loader, test_loader, criterion, optimizer, num_epochs=10)
+

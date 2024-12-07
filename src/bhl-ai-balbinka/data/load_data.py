@@ -43,7 +43,7 @@ def filter_data(base_path):
     result = []
     labels = pd.read_csv(base_path + '/meta_data.csv')
     for folder, images in folder_data.items():
-        id = '_'.join(folder.split('/')[-2:])
+        id = '_'.join(folder.split(os.sep)[-2:])
         if len(images) < 40 or id not in labels['id'].values:
             continue
         flag = True
