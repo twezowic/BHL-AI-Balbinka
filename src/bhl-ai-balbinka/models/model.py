@@ -19,7 +19,7 @@ from data.load_data import main_load, get_data_dir
 # Set CUDA device
 os.environ['CUDA_VISIBLE_DEVICES'] = "2"
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Define the custom dataset
 class SDOBenchmarkDataset(Dataset):
@@ -34,7 +34,7 @@ class SDOBenchmarkDataset(Dataset):
         ])
         self.labels: pd.DataFrame = None
         self.data, self.labels = self.load_data()
-
+        self.data1, _ = self.load_data()
 
 
     def load_data(self):
@@ -69,8 +69,8 @@ class SDOBenchmarkDataset(Dataset):
                 image_tensors = []
                 for file_name in os.listdir(path):
                     file = os.path.join(path, file_name)
-                    # image = Image.open(file).convert('L')
-                    image = Image.open(file).convert('RGB')
+                    image = Image.open(file).convert('L')
+                    #image = Image.open(file).convert('RGB')
                     image_tensor = transform(image)
                     image_tensors.append(image_tensor)
                 folder_tensor = torch.stack(image_tensors)  # Stack images into one tensor for this folder
@@ -79,11 +79,11 @@ class SDOBenchmarkDataset(Dataset):
                 image_data.append(folder_tensor)
 
 
-        return image_data, label_data
+        return image_data, labels
 
 
     def __len__(self):
-        return len(self.data)
+        return len(self.data1)
 
     def __getitem__(self, idx):
         images = self.data[idx]  # Assuming list of file paths
@@ -94,63 +94,73 @@ class SDOBenchmarkDataset(Dataset):
             #     img = self.transform(img)
             # image_stack.append(img)
         #images_tensor = torch.stack(image_stack)  # Shape: (channels, H, W)
-        label = self.labels["peak_flux"][idx]
-        return images, torch.tensor(label, dtype=torch.float64)
+        label = self.labels[idx]
+        return images, torch.tensor(label, dtype=torch.float32)
 
 # Define the model
 class SolarFlareModel(nn.Module):
     def __init__(self, scales, num_categories):
         super(SolarFlareModel, self).__init__()
 
-        self.time_distributed = nn.Sequential(
-            nn.Conv2d(4, 32, kernel_size=3, stride=2, bias=False),
-            nn.BatchNorm2d(32),
+        self.my_test = nn.Sequential(
+            nn.Conv2d(40, 128, kernel_size=3, padding=1, stride=2), # 256x256 => 128x128
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, bias=False),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(256, 64, kernel_size=3, padding=1, stride=2),  # 128x128 => 64x64
             nn.ReLU()
         )
+        # self.time_distributed = nn.Sequential(
+        #     nn.Conv2d(3, 32, kernel_size=3, stride=2, bias=False),
+        #     nn.BatchNorm2d(32),
+        #     nn.ReLU(),
+        #     nn.Conv2d(32, 64, kernel_size=3, bias=False),
+        #     nn.BatchNorm2d(64),
+        #     nn.ReLU()
+        # )
 
         self.separable_blocks = nn.Sequential(
-            nn.Conv2d(64, scales[3], kernel_size=1, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(scales[3]),
+            nn.Conv2d(1, 2, kernel_size=3, stride=2, padding=1, bias=False),
+            # nn.BatchNorm2d(2),
             nn.ReLU(),
-            nn.Conv2d(scales[3], scales[3], kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(scales[3]),
-            nn.ReLU(),
-            nn.Conv2d(scales[3], scales[4], kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(scales[4]),
-            nn.ReLU()
+            # nn.Conv2d(129, 64, kernel_size=3, padding=1, bias=False),
+            # nn.BatchNorm2d(scales[3]),
+            # nn.ReLU(),
+            # nn.Conv2d(64, 32, kernel_size=3, padding=1, bias=False),
+            # nn.BatchNorm2d(scales[4]),
+            # nn.ReLU()
         )
 
         self.global_pool = nn.AdaptiveMaxPool2d(1)
 
         self.fc = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(scales[4] + 1, 128),
+            nn.Linear(131072, 1024),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(1024, 32),
             nn.ReLU(),
-            nn.Linear(128, num_categories),
-            nn.Softmax(dim=1)
+            nn.Linear(32, 1),
+            # nn.Softmax(dim=1)
         )
 
-    def forward(self, images, date_input):
-        batch_size, time_steps, C, H, W = images.size()
-        x = images.view(-1, C, H, W)
-        x = self.time_distributed(x)
-        x = x.view(batch_size, time_steps, -1)
+    def forward(self, x, date_input):
+        batch_size, time_steps, C, H, W = x.size()
+        x = x.view(-1, time_steps, H, W)
+        x = self.my_test(x)
+        batch_size, time_steps, H, W = x.size()
+        x = x.view(1, 256, -1)
+        # x = self.separable_blocks(x)
+        # x = self.global_pool(x)
         x = self.separable_blocks(x)
-        x = self.global_pool(x)
         x = x.view(batch_size, -1)
-        x = torch.cat([x, date_input], dim=1)
-        return self.fc(x)
+        x = self.fc(x)
+        return x
 
 # Training setup
 base_path = os.path.join(get_data_dir(), 'SDOBenchmark-data-example')
 
 params = {'dim': (4, 256, 256, 4),
-          'batch_size': 16,
+          'batch_size': 1,
           'channels': ['magnetogram', '304', '131', '1700'],
           'shuffle': True,
           'label_func': lambda y: torch.tensor(np.floor(np.log10(y) + 9).astype(int))}
@@ -160,12 +170,13 @@ validation_dataset = SDOBenchmarkDataset(os.path.join(base_path, 'test'), params
 
 train_loader = DataLoader(training_dataset, batch_size=params['batch_size'], shuffle=params['shuffle'])
 val_loader = DataLoader(validation_dataset, batch_size=params['batch_size'], shuffle=False)
+val_loader_2 = DataLoader(validation_dataset, batch_size=params['batch_size'], shuffle=False)
 
-scales = [64, 64 * 3, 1, 128, 256]
+scales = [64, 64 * 3, 1, 128, 128]
 num_categories = 7
 
 model = SolarFlareModel(scales, num_categories).to(device)
-criterion = nn.CrossEntropyLoss()
+criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Training loop
@@ -173,6 +184,14 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
+
+
+#        for idx in range(len(train_loader)):
+
+        #    images, labels = train_loader[idx]
+            # Process one sample at a time
+
+        #images, labels = next(iter(train_loader))
         for images, labels in train_loader:
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
@@ -188,13 +207,13 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            for images, labels in val_loader:
+            for images, labels in val_loader_2:
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images, labels)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
 
-        print(f"Validation Loss: {val_loss/len(val_loader):.4f}")
+        print(f"Validation Loss: {val_loss/len([1, 2, 3]):.4f}")
 
 # Train the model
 train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=10)
