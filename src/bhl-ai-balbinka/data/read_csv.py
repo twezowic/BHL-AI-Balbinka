@@ -7,7 +7,7 @@ def get_labels(filepath: str):
 
 
 def find_peakflux(data: pd.DataFrame, id):
-    return data[data['id'] == id]["peak_flux"][0]
+    return data[data['id'] == id]["peak_flux"].iloc[0]
 
 
 
