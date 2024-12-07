@@ -3,6 +3,7 @@
 import sys
 import os
 from pathlib import Path
+import pandas as pd
 # sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # path for the project directory
@@ -40,9 +41,10 @@ def filter_data(base_path):
     """
     folder_data = process_directory(base_path)
     result = []
-
+    labels = pd.read_csv(base_path + '/meta_data.csv')
     for folder, images in folder_data.items():
-        if len(images) < 40:
+        id = '_'.join(folder.split('/')[-2:])
+        if len(images) < 40 or id not in labels['id'].values:
             continue
         flag = True
         for image_path in images:
