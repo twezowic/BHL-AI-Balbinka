@@ -1,0 +1,6 @@
+name: bhl-ai-balbinka
+dependencies:
+  - matplotlib
+  - numpy
+  - pandas
+  - pathlib
