@@ -44,8 +44,8 @@ class SDOBenchmarkDataset(Dataset):
         transform = transforms.Compose([
             transforms.ToTensor(),
         ])
-        image_tensors = []
         for interesting_files in main_load(self.data_path):
+            image_tensors = []
             for file in interesting_files:
                 image = Image.open(file).convert('L')
                 image_tensor = transform(image)
@@ -96,21 +96,13 @@ class SolarFlareModel(nn.Module):
         super(SolarFlareModel, self).__init__()
 
         self.my_test = nn.Sequential(
-            nn.Conv2d(40, 128, kernel_size=3, padding=1, stride=2), # 256x256 => 128x128
+            nn.Conv2d(4, 128, kernel_size=3, padding=1, stride=2), # 256x256 => 128x128
             nn.ReLU(),
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(256, 64, kernel_size=3, padding=1, stride=2),  # 128x128 => 64x64
             nn.ReLU()
         )
-        # self.time_distributed = nn.Sequential(
-        #     nn.Conv2d(3, 32, kernel_size=3, stride=2, bias=False),
-        #     nn.BatchNorm2d(32),
-        #     nn.ReLU(),
-        #     nn.Conv2d(32, 64, kernel_size=3, bias=False),
-        #     nn.BatchNorm2d(64),
-        #     nn.ReLU()
-        # )
 
         self.separable_blocks = nn.Sequential(
             nn.Conv2d(1, 2, kernel_size=3, stride=2, padding=1, bias=False),
@@ -139,6 +131,7 @@ class SolarFlareModel(nn.Module):
     def forward(self, x, date_input):
         batch_size, time_steps, C, H, W = x.size()
         x = x.view(-1, time_steps, H, W)
+
         x = self.my_test(x)
         batch_size, time_steps, H, W = x.size()
         x = x.view(1, 256, -1)
