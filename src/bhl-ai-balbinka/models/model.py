@@ -44,20 +44,32 @@ class SDOBenchmarkDataset(Dataset):
         transform = transforms.Compose([
             transforms.ToTensor(),
         ])
-        for folder in main_load(self.data_path):
-            path = os.path.join(images_dir, folder)
-            if os.path.isdir(path):
-                image_tensors = []
-                for file_name in os.listdir(path):
-                    file = os.path.join(path, file_name)
-                    image = Image.open(file).convert('L')
-                    #image = Image.open(file).convert('RGB')
-                    image_tensor = transform(image)
-                    image_tensors.append(image_tensor)
-                folder_tensor = torch.stack(image_tensors)  # Stack images into one tensor for this folder
-                id = '_'.join(folder.split('\\')[-2:])
-                labels.append(normalize(label_data, id))
-                image_data.append(folder_tensor)
+        image_tensors = []
+        for interesting_files in main_load(self.data_path):
+            for file in interesting_files:
+                image = Image.open(file).convert('L')
+                image_tensor = transform(image)
+                image_tensors.append(image_tensor)
+            folder_tensor = torch.stack(image_tensors)
+            id = '_'.join(file.split(os.sep)[-3:-1])
+            labels.append(normalize(label_data, id))
+            image_data.append(folder_tensor)
+
+
+            # path = os.path.join(images_dir, folder)
+
+            # if os.path.isdir(path):
+            #     image_tensors = []
+            #     for file_name in os.listdir(path):
+            #         file = os.path.join(path, file_name)
+            #         image = Image.open(file).convert('L')
+            #         #image = Image.open(file).convert('RGB')
+            #         image_tensor = transform(image)
+            #         image_tensors.append(image_tensor)
+            #     folder_tensor = torch.stack(image_tensors)  # Stack images into one tensor for this folder
+            #     id = '_'.join(folder.split('\\')[-2:])
+            #     labels.append(normalize(label_data, id))
+            #     image_data.append(folder_tensor)
 
 
         return image_data, labels

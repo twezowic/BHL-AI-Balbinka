@@ -13,6 +13,7 @@ project_dir = Path(__file__).resolve().parents[3]
 import os
 from PIL import Image
 
+lookingFor = ["magnetogram"]
 
 def read_jpeg_metadata(file_path):
     image = Image.open(file_path)
@@ -43,16 +44,22 @@ def filter_data(base_path):
     result = []
     labels = pd.read_csv(base_path + '/meta_data.csv')
     for folder, images in folder_data.items():
+        if (len(images) < len(lookingFor) * 4): continue
+
         id = '_'.join(folder.split(os.sep)[-2:])
-        if len(images) < 40 or id not in labels['id'].values:
+        if id not in labels['id'].values:
             continue
         flag = True
+        correct_images = []
         for image_path in images:
             if read_jpeg_metadata(image_path):
                 flag = False
                 break
-        if flag:
-            result.append(folder)
+            for substring in lookingFor:
+                if substring in image_path:
+                    correct_images.append(image_path)
+        if flag and len(correct_images) == len(lookingFor) * 4:
+            result.append(correct_images)
     return result
 
 
