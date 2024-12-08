@@ -60,6 +60,7 @@ def filter_data(base_path):
                     correct_images.append(image_path)
         if flag and len(correct_images) == len(lookingFor) * 4:
             result.append(correct_images)
+            # return result
     return result
 
 
